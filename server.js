@@ -1,8 +1,10 @@
 var express = require('express');
 var URL = require('url');
 var app = express();
+var mongo = require('mongodb').MongoClient;
 
 var PORT = process.env.PORT || 8080;
+var dbUrl = process.env.MONGOLAB_URI;
 
 app.use(function (req, res, next) {
     if (req.url.endsWith('/favicon.ico')) res.end(404);
@@ -31,26 +33,41 @@ app.listen(PORT, function () {
    console.log('Server listening to port: ' + PORT); 
 });
 
-var data = [];
 function generateShortUrl(host, url, callback) {
     var result = {
         original_url: url,
         short_url: 'https://' + host + '/' + Date.now()
     };
-    data.push(result);
     
-    callback(null, result);
+    mongo.connect(dbUrl, function (err, db) {
+       if (err) throw err;
+       db.collection('urls').insert(result, function (err, doc) {
+            if (err) return callback(err);
+            
+            callback(null, {
+                original_url: result.original_url,
+                short_url: result.short_url
+            });
+            db.close();
+       });
+    });
 }
 
 function getOriginalUrl(host, shortUrl, callback) {
     shortUrl = 'https://' + host + '/' + shortUrl;
-    for (var i = 0; i < data.length; i++) {
-        if (data[i].short_url === shortUrl) {
-            return callback(null, data[i].original_url);
-        }
-    }
     
-    callback({ msg: 'Url not found'});
+    mongo.connect(dbUrl, function (err, db) {
+       if (err) throw err;
+       db.collection('urls').find({ short_url: shortUrl })
+                            .toArray(function (err, docs) {
+                                if (err) return callback(err);
+                                
+                                if (docs.length == 0) return callback({ msg: 'Url not found'});
+                                
+                                callback(null, docs[0].original_url);
+                                db.close();
+                            });
+    });
 }
 
 function redirectTo(res, url) {
